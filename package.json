@@ -1,0 +1,11 @@
+{
+  "name": "mhub-mediathek",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The ARD Mediathek without the frills, on a domain of its own",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "license": "MIT"
+}

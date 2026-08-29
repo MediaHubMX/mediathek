@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Mediathek</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Die ARD Mediathek ohne Schnickschnack. Eine HTML-Datei, gebaut auf der mHub Browser API und dem ard-mediathek-Addon.">
+<script src="https://mhub.mx/mhub.js"></script>
+<style>
+  :root {
+    --bg: #0a0c11; --card: #12171f; --line: #2b323d;
+    --text: #e8eaed; --dim: #9aa3af; --accent: #6e9bff;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; min-height: 100vh;
+  }
+  body.tv { font-size: 22px; }
+  a { color: var(--accent); }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; transition: transform 160ms var(--ease-out); }
+  button:active { transform: scale(0.97); }
+  button:focus-visible, .card:focus-visible, .episode:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  header {
+    display: flex; align-items: center; gap: 16px; padding: 16px 24px;
+    position: sticky; top: 0; background: rgba(10,12,17,.92); backdrop-filter: blur(8px); z-index: 2;
+  }
+  body.tv header { padding: 28px 48px; }
+  header h1 { font-size: 1.15em; font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #back { width: 40px; height: 40px; border-radius: 50%; background: var(--card); font-size: 1.2em; display: none; }
+  body.deep #back { display: block; }
+  #search { display: flex; gap: 8px; }
+  #search input {
+    font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line);
+    border-radius: 999px; padding: 6px 14px; width: 220px; max-width: 40vw;
+  }
+  #search input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+  main { padding: 8px 24px 40px; }
+  body.tv main { padding: 8px 48px 60px; }
+  .row { margin: 12px 0 24px; }
+  .row h2 { font-size: 1.05em; font-weight: 600; margin-bottom: 10px; }
+  .row h2 button { text-align: left; }
+  .row h2 button::after { content: " ›"; color: var(--dim); }
+  .rail { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 6px; scrollbar-width: none; }
+  .rail::-webkit-scrollbar { display: none; }
+  .rail .card { flex: 0 0 240px; scroll-snap-align: start; }
+  body.tv .rail .card { flex-basis: 320px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-top: 12px; }
+  body.tv .grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .card { display: block; text-align: left; border-radius: 10px; overflow: hidden; background: var(--card); transition: transform 200ms var(--ease-out); }
+  @media (hover: hover) and (pointer: fine) { .card:hover { transform: translateY(-2px); } }
+  .card:active { transform: scale(0.98); }
+  .card .img { aspect-ratio: 16/9; background: #1a2029 center/cover no-repeat; }
+  .card .name {
+    padding: 8px 10px; font-size: .9em; line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .card .meta { padding: 0 10px 8px; font-size: .78em; color: var(--dim); }
+
+  .item { display: grid; grid-template-columns: minmax(0, 480px) 1fr; gap: 28px; margin-top: 12px; }
+  @media (max-width: 720px) { .item { grid-template-columns: 1fr; } }
+  .item .img { aspect-ratio: 16/9; border-radius: 12px; background: var(--card) center/cover no-repeat; }
+  .item h2 { font-size: 1.4em; line-height: 1.2; margin-bottom: 8px; }
+  .item .meta { color: var(--dim); margin-bottom: 14px; }
+  .item p { white-space: pre-line; color: #c9cdd3; max-width: 70ch; }
+  .play {
+    display: inline-block; margin: 12px 0 18px; padding: 10px 22px; border-radius: 999px;
+    background: var(--accent); color: #0a0c11; font-weight: 600;
+  }
+  .play:disabled { background: var(--line); color: var(--dim); cursor: default; }
+  .season { margin-top: 22px; }
+  .season h3 { font-size: 1em; color: var(--dim); margin-bottom: 8px; }
+  .episode {
+    display: flex; gap: 12px; width: 100%; text-align: left; padding: 8px; border-radius: 8px; align-items: center;
+  }
+  @media (hover: hover) and (pointer: fine) { .episode:hover { background: var(--card); } }
+  .episode .img { flex: 0 0 140px; aspect-ratio: 16/9; border-radius: 6px; background: var(--card) center/cover no-repeat; }
+  .episode .num { color: var(--dim); font-size: .85em; }
+
+  .more { display: block; margin: 20px auto; padding: 10px 24px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); }
+  .hint { color: var(--dim); margin: 24px 0; }
+
+  /* Einblenden mit Opacity, Ausblenden sofort: Schließen ist die Antwort auf
+     eine Taste, da darf nichts nachlaufen. */
+  #player { position: fixed; inset: 0; background: #000; z-index: 10; opacity: 0; visibility: hidden; }
+  #player.open { opacity: 1; visibility: visible; transition: opacity 200ms var(--ease-out); }
+  #player video { width: 100%; height: 100%; }
+  #player .bar { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; gap: 8px; pointer-events: none; }
+  #player .bar button { pointer-events: auto; }
+  #player .bar button {
+    height: 44px; min-width: 44px; padding: 0 14px; border-radius: 22px;
+    background: rgba(0,0,0,.6); color: #fff; font-size: 1em; opacity: .85;
+  }
+  #player .close { font-size: 1.3em; padding: 0; }
+  #player .subs { margin-left: auto; display: none; }
+  #player .subs.has { display: block; }
+  #player .subs.on { background: #fff; color: #000; }
+  #player .note {
+    position: absolute; left: 50%; bottom: 80px; transform: translateX(-50%);
+    padding: 8px 14px; border-radius: 8px; background: rgba(0,0,0,.7); color: #fff; font-size: .9em;
+    opacity: 0; transition: opacity 200ms var(--ease-out); pointer-events: none;
+  }
+  #player .note.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    button, .card, #player.open, #player .note { transition: none; }
+    .card:hover { transform: none; }
+  }
+  footer { padding: 24px; color: var(--dim); font-size: .8em; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <button id="back" type="button" aria-label="Zurück">‹</button>
+  <h1 id="title">ARD Mediathek</h1>
+  <form id="search"><input type="search" placeholder="Suchen" aria-label="Suchen"></form>
+</header>
+<main id="main"></main>
+<footer>Inhalte der ARD Mediathek über das <a href="https://www.mhub.mx/ard-mediathek/mhub-addon.json">ard-mediathek-Addon</a>. <a href="https://mhub.mx">Gebaut auf der mHub Browser API.</a></footer>
+<div id="player">
+  <video controls playsinline></video>
+  <div class="bar">
+    <button class="close" type="button" aria-label="Schließen">‹</button>
+    <button class="subs" type="button" aria-pressed="false">Untertitel</button>
+  </div>
+  <div class="note"></div>
+</div>
+
+<script>
+(async () => {
+  const ADDON = "https://www.mhub.mx/ard-mediathek";
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // Der Bootscript liefert mhub.ready: true in einer mHub-App, false im
+  // normalen Browser. Das Addon und das ARD-CDN antworten mit CORS-Headern,
+  // deshalb funktioniert die Seite in beiden Fällen gleich; in der App laufen
+  // Anfragen und Streams zusätzlich über den Host.
+  const hosted = window.mhub && window.mhub.ready ? await window.mhub.ready : false;
+  const device = (hosted && window.mhub.device) || {};
+  const caps = (hosted && window.mhub.capabilities) || [];
+  if (device.isTV) document.body.classList.add("tv");
+  if (hosted) window.mhub.setLinks([{ id: "mediathek", name: "Mediathek", url: "./" }]);
+
+  const get = async (path) => {
+    const res = await (hosted ? window.mhub.fetch(ADDON + path) : fetch(ADDON + path));
+    if (!res.ok) throw new Error("addon " + res.status);
+    return res.json();
+  };
+  const seg = (s) => encodeURIComponent(s);
+  const catalog = (id, cursor, search) => get("/catalog/video/" + seg(id) + ".json?"
+    + new URLSearchParams(Object.assign({}, cursor ? { cursor } : {}, search ? { search } : {})));
+  const item = (type, id) => get("/item/" + type + "/" + seg("ard:" + id) + ".json");
+  const subtitles = (id) => get("/subtitle/video/" + seg("ard:" + id) + ".json").then((r) => r.subtitles || [], () => []);
+
+  // Wiedergabestände folgen der Site (mhub.storage), im Browser localStorage.
+  const store = {
+    get: (k) => hosted ? window.mhub.storage.get(k) : Promise.resolve(localStorage.getItem(k)),
+    set: (k, v) => hosted ? window.mhub.storage.set(k, v) : Promise.resolve(localStorage.setItem(k, v)),
+  };
+
+  // ---------------------------------------------------------- navigation --
+  // Ein Stapel von Ansichten. Die Tiefe wird dem Host gemeldet, damit seine
+  // Zurück-Taste hier landet (mhubback) und nicht die Site verlässt. Im
+  // normalen Browser trägt stattdessen die History jede Ebene.
+  const stack = [];
+  const claim = () => {
+    document.body.classList.toggle("deep", stack.length > 1);
+    if (hosted) window.mhub.setBackHandler(stack.length - 1);
+  };
+  const show = (view) => {
+    $("title").textContent = view.title || "ARD Mediathek";
+    $("main").innerHTML = "";
+    scrollTo(0, 0);
+    view.render($("main")).catch((e) => {
+      $("main").innerHTML = '<p class="hint">Das hat nicht geklappt: ' + esc(e.message) + "</p>";
+    });
+    claim();
+  };
+  const push = (view) => {
+    stack.push(view);
+    if (!hosted) history.pushState({ depth: stack.length - 1 }, "");
+    show(view);
+  };
+  const pop = () => {
+    if (stack.length < 2) return;
+    stack.pop();
+    show(stack[stack.length - 1]);
+  };
+  addEventListener("mhubback", () => { if (player.open) closePlayer(); else pop(); });
+  addEventListener("popstate", (e) => {
+    if (player.open) return closePlayer();
+    const depth = (e.state && e.state.depth) || 0;
+    while (stack.length - 1 > depth) stack.pop();
+    show(stack[stack.length - 1]);
+  });
+  $("back").addEventListener("click", () => hosted ? pop() : history.back());
+  addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (player.open) closePlayer(); else if (hosted) pop(); else history.back();
+  });
+
+  // -------------------------------------------------------------- suche --
+  const openSearch = (q) => {
+    q = q.trim();
+    if (!q) return;
+    push({ title: "Suche: " + q, render: (el) => renderGrid(el, (cursor) => catalog(rows[0].catalog, cursor, q)) });
+  };
+  $("search").addEventListener("submit", (e) => {
+    e.preventDefault();
+    openSearch(e.target.querySelector("input").value);
+  });
+  // Mit Host-Suche (Adressleiste, TV-Suche) braucht die Seite kein eigenes Feld.
+  if (hosted && caps.indexOf("search") >= 0) {
+    window.mhub.setSearch({ placeholder: "ARD Mediathek durchsuchen", onQuery: openSearch });
+    $("search").style.display = "none";
+  }
+
+  // ------------------------------------------------------------- render --
+  const runtime = (s) => s ? Math.round(s / 60) + " Min." : "";
+  const date = (d) => d ? new Date(d).toLocaleDateString("de-DE") : "";
+  const card = (it) =>
+    '<button type="button" class="card" data-i="' + esc(it.id) + '">' +
+    '<div class="img" style="' + (it.images && it.images.poster ? "background-image:url(" + esc(it.images.poster) + ")" : "") + '"></div>' +
+    '<div class="name">' + esc(it.name) + "</div>" +
+    '<div class="meta">' + esc([date(it.releaseDate), runtime(it.runtime)].filter(Boolean).join(" · ")) + "</div></button>";
+  const open = (it) => {
+    if (it.directory) return push({ title: it.name, render: (el) => renderGrid(el, (cursor) => catalog(it.directory.catalogId, cursor)) });
+    push({ title: it.name, render: (el) => renderItem(el, it.type, it.id) });
+  };
+  const wire = (el, items) => el.querySelectorAll(".card[data-i]").forEach((b) => {
+    const it = items.find((i) => i.id === b.getAttribute("data-i"));
+    b.addEventListener("click", () => open(it));
+  });
+
+  const renderGrid = async (el, page) => {
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    el.appendChild(grid);
+    const all = [];
+    const load = async (cursor) => {
+      const res = await page(cursor);
+      const frag = document.createElement("div");
+      frag.innerHTML = res.items.map(card).join("");
+      wire(frag, res.items);
+      all.push(...res.items);
+      while (frag.firstChild) grid.appendChild(frag.firstChild);
+      el.querySelector(".more") && el.querySelector(".more").remove();
+      if (!all.length) el.insertAdjacentHTML("beforeend", '<p class="hint">Nichts gefunden.</p>');
+      if (res.nextCursor) {
+        const more = document.createElement("button");
+        more.type = "button"; more.className = "more"; more.textContent = "Mehr laden";
+        more.addEventListener("click", () => { more.disabled = true; load(res.nextCursor); });
+        el.appendChild(more);
+      }
+    };
+    await load(null);
+  };
+
+  const renderHome = async (el) => {
+    for (const row of rows) {
+      const div = document.createElement("section");
+      div.className = "row";
+      div.innerHTML = '<h2><button type="button">' + esc(row.name) + '</button></h2><div class="rail"></div>';
+      div.querySelector("h2 button").addEventListener("click", () =>
+        push({ title: row.name, render: (el) => renderGrid(el, (cursor) => catalog(row.catalog, cursor)) }));
+      el.appendChild(div);
+      catalog(row.catalog).then((res) => {
+        div.querySelector(".rail").innerHTML = res.items.map(card).join("");
+        wire(div, res.items);
+      }).catch(() => div.remove());
+    }
+  };
+
+  const renderItem = async (el, type, id) => {
+    const it = await item(type, id);
+    if (!it) throw new Error("nicht gefunden");
+    $("title").textContent = it.name;
+    const poster = it.images && it.images.poster;
+    const seasons = {};
+    (it.children || []).forEach((c) => (seasons[c.season] = seasons[c.season] || []).push(c));
+    el.innerHTML = '<div class="item">' +
+      '<div class="img" style="' + (poster ? "background-image:url(" + esc(poster) + ")" : "") + '"></div><div>' +
+      "<h2>" + esc(it.name) + "</h2>" +
+      '<div class="meta">' + esc([date(it.releaseDate), runtime(it.runtime)].filter(Boolean).join(" · ")) + "</div>" +
+      (type === "video" ? '<button type="button" class="play"' + (it.sources && it.sources.length ? "" : " disabled") + ">" +
+        (it.sources && it.sources.length ? "▶ Abspielen" : "Nicht verfügbar (Geoblocking?)") + "</button>" : "") +
+      "<p>" + esc(it.description) + "</p>" +
+      Object.keys(seasons).sort((a, b) => a - b).map((s) =>
+        '<div class="season"><h3>Staffel ' + esc(s) + "</h3>" + seasons[s].map((c) =>
+          '<button type="button" class="episode" data-i="' + esc(c.id) + '">' +
+          '<div class="img" style="' + (c.images && c.images.poster ? "background-image:url(" + esc(c.images.poster) + ")" : "") + '"></div>' +
+          '<div><div class="num">Folge ' + c.episode + (c.releaseDate ? " · " + date(c.releaseDate) : "") + "</div>" + esc(c.name) + "</div></button>").join("") + "</div>").join("") +
+      "</div></div>";
+    const play = el.querySelector(".play");
+    if (play && !play.disabled) play.addEventListener("click", () => playItem(it));
+    el.querySelectorAll(".episode").forEach((b) =>
+      b.addEventListener("click", () => open(it.children.find((c) => c.id === b.getAttribute("data-i")))));
+  };
+
+  // ------------------------------------------------------------- player --
+  // HLS läuft über hls.js, wo es MSE gibt; nur Safari (iOS) spielt es nativ.
+  // canPlayType taugt dafür nicht: Chromium sagt "maybe" und kann es nicht.
+  // In einer mHub-App geht die URL durch mhub.openStream: der eine Weg,
+  // externe Medien zu starten. ARD-Streams brauchen keine Header, also kommt
+  // die URL unverändert zurück und nichts fragt nach.
+  const player = $("player");
+  const video = player.querySelector("video");
+  let hls = null, stream = null, saveTimer = null;
+  const loadHlsJs = () => new Promise((res, rej) => {
+    if (window.Hls) return res();
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
+    s.onload = res; s.onerror = () => rej(new Error("hls.js konnte nicht geladen werden"));
+    document.head.appendChild(s);
+  });
+  const playItem = async (it) => {
+    const src = it.sources.find((s) => /\.m3u8/.test(s.url)) || it.sources[0];
+    const play = document.querySelector(".play");
+    try {
+      stream = hosted ? await window.mhub.openStream({ url: src.url }) : { url: src.url };
+    } catch (e) { play.textContent = "Stream konnte nicht gestartet werden"; return; }
+    player.classList.add("open"); player.open = true;
+    if (hosted) window.mhub.setImmersive(true);
+    const key = "pos:" + it.id;
+    const resume = Number(await store.get(key)) || 0;
+    if (/\.m3u8/.test(src.url) && (await loadHlsJs().then(() => Hls.isSupported(), () => false))) {
+      hls = new Hls();
+      hls.loadSource(stream.url);
+      hls.attachMedia(video);
+    } else {
+      video.src = stream.url;
+    }
+    video.addEventListener("loadedmetadata", () => { if (resume > 5 && resume < video.duration - 30) video.currentTime = resume; }, { once: true });
+    video.play().catch(() => {});
+    addTracks(it.id);
+    saveTimer = setInterval(() => { if (!video.paused) store.set(key, String(Math.floor(video.currentTime))); }, 5000);
+  };
+  // Untertitel kommen aus dem subtitle-Resource des Addons. Der Text wird
+  // selbst geladen und als Blob angehängt: so braucht das Video kein
+  // crossorigin, und der Weg ist derselbe, ob der Host den Stream proxyt oder
+  // nicht. Geschaltet wird über einen eigenen Knopf, nicht über das native
+  // Menü des Videos: das ist auf jedem Gerät anders und übernimmt teils die
+  // Seitenfarben nur halb. Die Wahl bleibt gespeichert.
+  const NAMES = { de: "Deutsch", en: "English" };
+  const subsButton = player.querySelector(".subs");
+  const note = (text) => {
+    const el = player.querySelector(".note");
+    el.textContent = text; el.classList.add("show");
+    clearTimeout(note.t); note.t = setTimeout(() => el.classList.remove("show"), 1800);
+  };
+  const setSubs = (on) => {
+    const t = video.textTracks[0];
+    if (!t) return;
+    t.mode = on ? "showing" : "hidden";
+    subsButton.classList.toggle("on", on);
+    subsButton.setAttribute("aria-pressed", String(on));
+    store.set("subs", on ? "1" : "0");
+  };
+  subsButton.addEventListener("click", () => setSubs(!subsButton.classList.contains("on")));
+  const addTracks = async (id) => {
+    for (const sub of await subtitles(id)) {
+      if (sub.format !== "vtt" || stream === null) continue;
+      try {
+        const res = await (hosted ? window.mhub.fetch(sub.url) : fetch(sub.url));
+        if (!res.ok || stream === null) continue;
+        const track = document.createElement("track");
+        track.kind = "subtitles";
+        track.srclang = sub.language;
+        track.label = NAMES[sub.language] || sub.language;
+        track.src = URL.createObjectURL(await res.blob());
+        video.appendChild(track);
+        if (!subsButton.classList.contains("has")) {
+          subsButton.classList.add("has");
+          setSubs((await store.get("subs")) === "1");
+        }
+      } catch (e) { /* ohne Untertitel, kein Schaden */ }
+    }
+  };
+  const closePlayer = () => {
+    clearInterval(saveTimer);
+    video.querySelectorAll("track").forEach((t) => { URL.revokeObjectURL(t.src); t.remove(); });
+    subsButton.classList.remove("has", "on");
+    video.pause();
+    if (hls) { hls.destroy(); hls = null; }
+    video.removeAttribute("src"); video.load();
+    if (stream && hosted) window.mhub.closeStream(stream.url);
+    stream = null;
+    player.classList.remove("open"); player.open = false;
+    if (hosted) window.mhub.setImmersive(false);
+    claim();
+  };
+  player.querySelector(".close").addEventListener("click", () => hosted ? closePlayer() : history.back());
+  video.addEventListener("error", () => { if (player.open) note("Wiedergabe fehlgeschlagen"); });
+
+  // --------------------------------------------------------------- start --
+  const manifest = await get("/mhub-addon.json");
+  const rows = manifest.dashboard || manifest.catalogs.map((c) => ({ name: c.name, catalog: c.id }));
+  history.replaceState({ depth: 0 }, "");
+  stack.push({ title: "ARD Mediathek", render: renderHome });
+  show(stack[0]);
+})().catch((e) => {
+  document.getElementById("main").innerHTML = '<p class="hint">Das Addon antwortet nicht: ' +
+    String(e.message).replace(/</g, "&lt;") + "</p>";
+});
+</script>
+</body>
+</html>
